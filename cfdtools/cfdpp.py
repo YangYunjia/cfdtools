@@ -6,6 +6,7 @@ a selection of tools to set, run and post-process the commercial software cfd++
 '''
 
 import os
+import time
 import numpy as np
 from .system import cfdpp_cmd
 from .tecplot import tec2py
@@ -20,6 +21,25 @@ typ_dict = {
     'mx':       5,
     'my':       6,
     'mz':       7
+}
+
+# the index of boundary conditions
+
+class cfdpp_bc():
+
+    def __init__(self, no: int, title: str, val_num: int) -> None:
+        self.no = no
+        self.title = title
+        self.val_num = val_num
+
+bc_dict = {
+    'sym':          cfdpp_bc(6, '', 0),
+    'wall':         cfdpp_bc(7, '', 0),
+    'charactistic': cfdpp_bc(16, 'primitive_variables_2', 7),
+    'backpressure': cfdpp_bc(35, 'back_pres', 1),
+    'totalpt':      cfdpp_bc(82, 'ptot_ttot_etc.', 4),
+    'mfr':          cfdpp_bc(98, 'massrate_temp_etc.', 4)
+
 }
 
 class cfdpp():
@@ -37,16 +57,17 @@ class cfdpp():
 
     '''
 
-    def __init__(self, op_dir=None, core=1, verbose='All'):
+    def __init__(self, op_dir=None, core=1, ave_window=0, verbose='All'):
         
         self.verbose = {'All': 0, 'Warning': 1, 'None': 2}[verbose]
-        
+                
         if op_dir is None:
             op_dir = os.getcwd()
         self.set_path(op_dir)
 
-        # for runing
+        # for runing parameters
         self.core_number = core
+        self.ave_window = ave_window
 
     def set_path(self, new_path):
         '''
@@ -60,7 +81,7 @@ class cfdpp():
         '''
         self.op_dir  = new_path
         self.inp_dir = os.path.join(new_path, "mcfd.inp")
-        self.bak_dir = os.path.join(new_path, "mcfd_bak_sp.inp")
+        self.bak_dir = os.path.join(new_path, "mcfd.inp.bak")
         self.FFM_data = None
         self.areas = None
 
@@ -144,7 +165,87 @@ class cfdpp():
         if self.verbose < 2: print("the key %s not found in file" % key)
         return None
 
+    def change_infset(self, bc_num, typ, infset_num):
+        '''
+        set the `key` in mcfd.inp to given value
+
+        paras
+        ===
+        - `key`   key to be find in `file` and set
+        - `value `    value to be set
+        - `file`    the file where the value need to be set
+            - if is None, set the value in `self.inp_dir` (mcfd.inp)
+
+        '''
+
+        data = ''
+
+        f_name = self.inp_dir
+        b_name = f_name + '.bak'
+        
+        line_idx = 100000
+
+        with open(f_name, 'r') as f, open(b_name, 'w') as fbak:
+            for idx, line in enumerate(f.readlines()):
+                fbak.write(line)
                 
+                if line.find('seq# type modi info') > -1:
+                    line_idx = idx
+                
+                if idx == line_idx + bc_num:
+                    line_sp = line.split()
+                    if line_sp[0] == str(bc_num):
+                        line = '%4d %4d %4d %4d %s\n' % (bc_num, bc_dict[typ].no, int(line_sp[2]), infset_num, line_sp[4])
+                    else:
+                        raise KeyError("Can't find boundary number %d" % bc_num)
+                data += line
+
+        with open(f_name, 'w') as f:
+            f.writelines(data)
+
+    def new_infset(self, typ, values):
+        
+        data = ''
+        current_infset_num = int(self.read_para('infsets'))
+        idx_infset = 0
+        flag = False
+
+        with open(self.inp_dir, 'r') as f, open(self.bak_dir, 'w') as fbak:
+            var_idx = 0
+            for idx, line in enumerate(f.readlines()):
+                fbak.write(line)
+                if line.find('infsets') > -1:
+                    flag = True
+
+                if flag and line[:4] == '#---':
+                    idx_infset += 1
+                
+                if flag and idx_infset == (current_infset_num + 1):
+                    data += line
+                    data += 'seq.# %d #vals %d title %s\n' % (current_infset_num + 1, bc_dict[typ].val_num, bc_dict[typ].title)
+                    rest_value_num = bc_dict[typ].val_num
+                    if rest_value_num != len(values):
+                        raise AttributeError('Number of value of type %s should be %d. (%d given)' % (typ, rest_value_num, len(values)))
+                    var_idx = 0
+                    while rest_value_num > 0:
+                        nline = 'values '
+                        for i in range(min(5, rest_value_num)):
+                            nline += "%.4e " % values[var_idx]
+                            var_idx += 1
+                        nline += "\n"
+                        rest_value_num -= 5
+                        data += nline
+                    flag = False
+                
+                data += line
+        
+        with open(self.inp_dir, 'w') as f:
+            f.writelines(data)
+
+        self.set_para('infsets', current_infset_num + 1)
+        
+        return current_infset_num + 1
+
     def set_infset(self, inf_num, values, filte=[]):
         '''
         write the infset in mcfd.inp
@@ -158,6 +259,7 @@ class cfdpp():
             each number represent the index to maintain current value in mcfd.inp, and not
             to be set by which in `values`
 
+        #TODO with class of boundary conditons, the code could be re-written since number of value is known for each type
         '''
         
         data = ''
@@ -294,7 +396,7 @@ class cfdpp():
         self.areas = areass
         # return data, areass    
 
-    def read_flux(self, typ, bc_series, ave_window=800, move_axis=None):
+    def read_flux(self, typ, bc_series, ave_window=-1, move_axis=None):
         '''
         read flux of given type and sum for given bc_series
 
@@ -327,8 +429,12 @@ class cfdpp():
         eps = 1e-3
         flux = 0.0
 
-        if ave_window > 0:
-            if self.verbose < 1:print("result averaged by %d steps" % (ave_window))
+        if ave_window < 0:
+            _ave = self.ave_window
+        else:
+            _ave = ave_window
+        if _ave > 0:
+            if self.verbose < 1:print("result averaged by %d steps" % (_ave))
 
         for i_bc in bc_series:
             # print("reading bc No. %d, type %s" % (i_bc,typ))
@@ -336,14 +442,20 @@ class cfdpp():
             flux_i = self.FFM_data[-1, i_bc-1, int_typ] 
             if abs(flux_i - self.FFM_data[-5, i_bc-1, int_typ]) / flux_i > eps:
                 if self.verbose < 2:print("bc No. %d, type %s not converge" % (i_bc,typ))
-            if ave_window > 0:
-                flux_i = sum([stepData[i_bc-1, int_typ] for stepData in self.FFM_data[-ave_window:]]) / ave_window
+            if _ave > 0:
+                flux_i = sum([stepData[i_bc-1, int_typ] for stepData in self.FFM_data[-_ave:]]) / _ave
 
             if move_axis is not None:
                 if typ == 'mz':
                     if self.verbose < 1:print("move axis")
-                    flux_i -= sum([stepData[i_bc-1, 3] for stepData in self.FFM_data[-ave_window:]]) / ave_window * move_axis[0]
-                    flux_i -= sum([stepData[i_bc-1, 2] for stepData in self.FFM_data[-ave_window:]]) / ave_window * move_axis[1]
+                    flux_i -= sum([stepData[i_bc-1, 3] for stepData in self.FFM_data[-_ave:]]) / _ave * move_axis[0]
+                    flux_i += sum([stepData[i_bc-1, 2] for stepData in self.FFM_data[-_ave:]]) / _ave * move_axis[1]
+                elif typ == 'my':
+                    if self.verbose < 1:print("move axis from point (x=%.3f, z=%.3f)" % (move_axis[0], move_axis[2]))
+                    flux_i += sum([stepData[i_bc-1, 4] for stepData in self.FFM_data[-_ave:]]) / _ave * move_axis[0]
+                    flux_i -= sum([stepData[i_bc-1, 2] for stepData in self.FFM_data[-_ave:]]) / _ave * move_axis[2]
+                else:
+                    raise Exception('axis not set')
 
             flux += flux_i
 
@@ -395,7 +507,6 @@ class cfdpp():
                 data['varnames'] = data_tmp['varnames']
             data['lines'] += data_tmp['lines']
         
-
         return data
 
     
@@ -419,6 +530,26 @@ class cfdpp():
 
         data = tec2py(os.path.join(self.op_dir, "lineoutput_1.tec"), info=False)
 
-
-
         return data
+
+    def set_output_avg(self, ave_window : int =0):
+        if ave_window > 0:
+            self.set_para('cdepsave_compute', 1)
+            self.set_para('cdepsave_restart', 0)
+            self.set_para('cdepsave_ntsave' , ave_window)
+        else:
+            self.set_para('cdepsave_compute', 0)
+            self.set_para('cdepsave_restart', 1)
+            self.set_para('cdepsave_ntsave' , 0)
+
+    def output_avg_field(self):
+        print(os.getcwd())
+        if not os.path.exists(os.path.join(self.op_dir, "cdaveout.bin")):
+            raise IOError("    [Warning] cdaveout.bin not exists\n Please output average file during runing")
+        time.sleep(1)
+        os.system('move ' + self.op_dir + "\\cdepsout.bin cdepsout.bin.bak")
+        os.system('move ' + self.op_dir + "\\cdaveout.bin cdepsout.bin")
+        if os.path.exists(os.path.join(self.op_dir, "mcfd_tec.bin")):
+            os.system('move ' + self.op_dir + "\\mcfd_tec.bin mcfd_tec.last.bin")
+        self.run_cfd(restart=True, step=0)
+

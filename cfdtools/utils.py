@@ -2,9 +2,6 @@ import math
 from functools import reduce
 from scipy.optimize import fsolve
 
-import subprocess
-import tempfile
-import os
 import copy
 
 ga = 1.4
@@ -41,11 +38,23 @@ def std_atomsphere(h, tref=288.15, rref=1.225, pref=101325, muref=1.72e-5):
 
     return {'temperature': t, 'pressure': p, 'density': r, 'viscosity': mu, 'soundspeed': a}
 
-def ideal_mfr(pt8, tt8, A8):
-    return coef8 * pt8 / tt8**0.5 * A8
+def ideal_mfr(pt8, tt8, A8, ma8=1.0):
+    
+    coef8 = math.sqrt(ga / R * (1 + 0.5 * (ga - 1) * ma8**2)**(-(ga + 1) / (ga - 1)))
+
+    return coef8 * ma8 *  pt8 / tt8**0.5 * A8
+
+def npr2ma(npr):
+    return math.sqrt(2.0 / (ga-1) * (npr**((ga-1)/ga) - 1))
+
+def tr2ma(tr):
+    return math.sqrt(2.0 / (ga-1) * (tr - 1))
 
 def ideal_thrust(pt7, tt7, p9, m8, fluid=None):
     npr = pt7 / p9
+    if npr < 1:
+        return 0.0, 0.0
+    
     if fluid is None:
         v9id = math.sqrt(2 * ga * R / (ga-1) * tt7 * (1 - npr**(-(ga-1)/ga)))
     else:
@@ -68,42 +77,61 @@ class Fluid():
         else:
             raise KeyError()
 
-    def cp_R(self, T):
+    def cp(self, T):
+        return self.cp_R(T) * R
+    
+    def cv(self, T):
+        return (self.cp(T) - 1) * R
 
-        if self.is_fix_thermo:
+    def gamma(self, T):
+        return self.cp(T) / self.cv(T)
+
+    def cp_R(self, T=None):
+
+        if T is None or self.is_fix_thermo:
             return self._cp_R
         else:
             return self.cal_cp_R(T)
 
-    def cal_cp_R(self, T, intergal=False):
+    def cal_cp_R(self, T, intergal=0):
         
         para = copy.deepcopy(self._cp_R_para)
 
-        if intergal:
-            for i in range(2, len(para[0])):
+        multi = 1.0
+
+        if intergal == 1:
+            for i in range(1, len(para[0])):
                 para[0][i] /= i
                 para[1][i] /= i
+            para[0][0] *= math.log(T)
+            para[1][0] *= math.log(T)
+
+        if intergal == 2:
+            for i in range(0, len(para[0])):
+                para[0][i] /= (i + intergal - 1)
+                para[1][i] /= (i + intergal - 1)
+            multi = T**(intergal - 1)
         # print(para[1][0]* math.log(T))
         
         if T < 100.0:
             return self.cal_cp_R(100.0, intergal=intergal)
         elif 100.0 <= T and T < 1000.0:
-            return reduce(lambda x,i: (x + para[0][-i-1]) * T, range(len(para[0])-1),0) + para[0][0] * (1, math.log(T))[intergal]
+            return multi * (reduce(lambda x,i: (x + para[0][-i-1]) * T, range(len(para[0])-1),0) + para[0][0])
         elif 1000.0 <= T and T < 5000.0:
-            return reduce(lambda x,i: (x + para[1][-i-1]) * T, range(len(para[1])-1),0) + para[1][0] * (1, math.log(T))[intergal]
+            return multi * (reduce(lambda x,i: (x + para[1][-i-1]) * T, range(len(para[1])-1),0) + para[1][0])
         elif 5000.0 <= T:
             return self.cal_cp_R(5000.0, intergal=intergal)
 
-    def cal_cp_R_intergal(self, T, T0):
+    def cal_cp_R_intergal(self, T, T0, intergal=1):
 
         if T < 1000.0 and 1000.0 <= T0:
-            delta = - self.cal_cp_R(1000 - 1e-7,intergal=True) + self.cal_cp_R(1000,intergal=True)
+            delta = - self.cal_cp_R(1000 - 1e-7,intergal=intergal) + self.cal_cp_R(1000,intergal=intergal)
         elif T0 < 1000.0 and 1000.0 <= T:
-            delta = self.cal_cp_R(1000 - 1e-7,intergal=True) - self.cal_cp_R(1000,intergal=True)
+            delta = self.cal_cp_R(1000 - 1e-7,intergal=intergal) - self.cal_cp_R(1000,intergal=intergal)
         else:
             delta = 0.0
         
-        return self.cal_cp_R(T,intergal=True) - self.cal_cp_R(T0,intergal=True) + delta
+        return self.cal_cp_R(T,intergal=intergal) - self.cal_cp_R(T0,intergal=intergal) + delta
 
 
 def t9(fluid, npr, tt7, fix_thermo=False):
@@ -119,17 +147,8 @@ def t9(fluid, npr, tt7, fix_thermo=False):
 def u9(fluid, tt7, t9):
     if t9 >= tt7:
         return 0.0
-    return math.sqrt(2 * R * (fluid.cp_R(tt7)*tt7 - fluid.cp_R(t9)*t9))
+    # return math.sqrt(2 * R * (fluid.cp_R(tt7)*tt7 - fluid.cp_R(t9)*t9))
+    return math.sqrt(2 * R * fluid.cal_cp_R_intergal(tt7, t9, intergal=2))
 
 
-if __name__ == '__main__':
-    air = Fluid('Air')
-    # npr = 1.895
-    # tt = 781.3
-    npr = 2.827
-    tt = 2063
-    t9_v = t9(air, npr, tt)
-    print(t9_v)
-    print(u9(air, tt, t9_v))
-    # print(ideal_mfr(191200, 781.3, 0.398))
-    print(ideal_thrust(npr, tt, 1, 1))
+

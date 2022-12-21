@@ -24,4 +24,4 @@ The interfaces are modified from [Luo Han](https://github.com/luohancfd/py2tec).
 
 CFD++ is a software suite that is available for use on all computer systems developed by Metacomp Technologies, which is a leading provider of software tools for major aerospace, defense, and automobile manufacturers. Tecplot is the name of a family of visualization & analysis software tools developed by Tecplot, Inc., which is headquartered in Bellevue, Washington. Any illegal use of the brand name and related products is beyond the expectation of the author of cfdtools. The author of cfdtools doesn't take any responsibility for the conditions.
 
-cfdtools is licensed with [GPL 3.0 or later](https://www.gnu.org/licenses/gpl-3.0.html). You are welcome to distribute the codes and you are not required to cite anything. But if you make any modifications, you are required to open source.
+The cfdtools is licensed with [GPL 3.0 or later](https://www.gnu.org/licenses/gpl-3.0.html). You are welcome to distribute the codes and you are not required to cite anything. But if you make any modifications, you are required to open source.
