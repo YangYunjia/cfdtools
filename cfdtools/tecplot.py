@@ -8,6 +8,8 @@ FEM_TYPE = [['FELINESEG'],
 
 FEM_FACE_TYPE = ['FEPOLYGON', 'FEPOLYHEDRAL']
 
+STRDIGIT = [str(digit) for digit in range(10)] + ['-']
+
 def _nparray2string(val):
     '''
     convert a numpy array to string
@@ -254,7 +256,7 @@ def py2tec(tdata, fname):
                     fid.write(_nparray2string(data.T))
                 fid.write('\n\n')
 
-def tec2py(datfile, info=True):
+def tec2py(datfile, info=True, is_sort=None):
     '''
     Argument list:
 
@@ -312,7 +314,7 @@ def tec2py(datfile, info=True):
                     jnum = False
                 
                     while True:
-                        if line[0] in [str(digit) for digit in range(10)]:
+                        if line[0] in STRDIGIT:
                             split_line = line.split()
                             break
                             
@@ -383,5 +385,18 @@ def tec2py(datfile, info=True):
 
         except StopIteration:
             pass
+
+        if is_sort is not None:
+
+            if is_sort not in var_list:
+                print('No variable "%s" in varlist:' % is_sort + var_list)
+            else:
+                sort_idx = var_list.index(is_sort)
+
+                for line in lines:
+                    sort_idx = np.argsort(line['data'][sort_idx])
+                    line['data'] = [np.array([d[i] for i in sort_idx]) for d in line['data']]
+
+
 
     return {'varnames': var_list, 'lines': lines}

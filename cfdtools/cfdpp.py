@@ -491,7 +491,7 @@ class cfdpp():
 
         return area       
 
-    def extract_bc(self, bc_series, forcenew, remove=True):
+    def extract_bc(self, bc_series, forcenew, remove=True, is_sort=None):
         data = {'varnames': None, 'lines': []}
         for i in bc_series:
             if forcenew or not os.path.exists(os.path.join(self.op_dir, "BC%d.dat" % i)):
@@ -502,7 +502,7 @@ class cfdpp():
             if not os.path.exists("BC%d.dat" % i):
                 raise IOError("    [Warning] BC%d not extract" %i)
             
-            data_tmp = tec2py(os.path.join(self.op_dir, "BC%d.dat" % i))
+            data_tmp = tec2py(os.path.join(self.op_dir, "BC%d.dat" % i), is_sort=is_sort)
             if data['varnames'] is None:
                 data['varnames'] = data_tmp['varnames']
             data['lines'] += data_tmp['lines']
