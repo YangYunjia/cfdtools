@@ -1,6 +1,7 @@
 import math
 from functools import reduce
 from scipy.optimize import fsolve
+import numpy as np
 
 import copy
 
@@ -150,5 +151,33 @@ def u9(fluid, tt7, t9):
     # return math.sqrt(2 * R * (fluid.cp_R(tt7)*tt7 - fluid.cp_R(t9)*t9))
     return math.sqrt(2 * R * fluid.cal_cp_R_intergal(tt7, t9, intergal=2))
 
+def avg_2d_data(xx, yy, zz, var):
+    length = ((xx[1:] - xx[:-1])**2 + (yy[1:] - yy[:-1])**2 + (zz[1:] - zz[:-1])**2)**0.5
+    avgvar = (var[1:] + var[:-1]) * 0.5
+
+    # for l, v in zip(length, avgvar):
+    #     print('%.6f %.6f' %(l, v))
+    # print(np.sum(length))
+    # print(length**2 * avgvar)
+    return np.sum(length * avgvar) / np.sum(length)
 
 
+def mfr_2d(xx, vv, rho):
+    # rot = np.repeat(np.array([[[0, 1], [-1, 0]]]), len(xx), axis=0)
+    # print(rot.shape)
+    nn = np.einsum('ij,jk->ik', np.array([[0, 1], [-1, 0]]), xx[:, 1:] - xx[:, :-1])
+    avgvv = (vv[:, 1:] + vv[:, :-1]) * 0.5
+    avgrho = (rho[1:] + rho[:-1]) * 0.5
+    mfr = np.einsum('j,ij,ij->j', avgrho, avgvv, nn)
+
+    return np.sum(mfr)
+
+def mfravg_2d_data(xx, vv, rho, var):
+    
+    nn = np.einsum('ij,jk->ik', np.array([[0, 1], [-1, 0]]), xx[:, 1:] - xx[:, :-1])
+    avgvv = (vv[:, 1:] + vv[:, :-1]) * 0.5
+    avgrho = (rho[1:] + rho[:-1]) * 0.5
+    mfr = np.einsum('j,ij,ij->j', avgrho, avgvv, nn)
+    avgvar = (var[1:] + var[:-1]) * 0.5
+    
+    return np.sum(mfr * avgvar) / np.sum(mfr)
